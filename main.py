@@ -13,23 +13,23 @@ pygame.init()
 screenSize = [800,450]
 
 #simulation settings
-boundsSize = (600, 350)
+boundsSize = (200, 200)
 gravity = 10
 collisionDamping = 1
-targetDensity = 1.5
-pressureMultiplier = 5
+targetDensity = 1
+pressureMultiplier = 4
 deltaTimeSetting = "fixed" #clock and fixed. use fixed when computing speed is low
 deltaTime = 0.16 #seconds per frame
 
 #particle setting
     #particle align setting
-particleNumber = 200
+particleNumber = 75
 particleSize = 3
-particleDistance = 10 # distance between particle's starting point
-particleNumberInRow = 30
+particleDistance = 12 # distance between particle's starting point
+particleNumberInRow = 8
     #particle physics setting
 particleMass = 1
-smoothingRadius = 15
+smoothingRadius = 30
 
 #DrawSetting
 backgroundColor = (0,0,0)
@@ -81,6 +81,7 @@ pressureForce = np.zeros((particleNumber,2))
 spatialLookup = np.zeros(particleNumber)
 startIndices = np.zeros(particleNumber)
 smoothingRadiusX2 = smoothingRadius*smoothingRadius
+cellOffsets = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,0),(0,1),(1,-1),(1,0),(1,1)]
 #바보같이 써놓은 코드, 나중에 제대로 바꿀것
 
 #particle smoothing variables
@@ -240,43 +241,44 @@ def DrawAll():
     DrawParticle()
 
 #optimization
-def PositionToCellCoord(point, radius):
-    cellX = point[0]//radius
-    cellY = point[1]//radius
+def PositionToCellCoord(point):
+    cellX = point[0]//smoothingRadius
+    cellY = point[1]//smoothingRadius
     return (cellX,cellY)
 
 def HashCell(cellX,cellY):
     return cellX * 15823 + cellY*9737333
 
 def GetKeyFromHash(hash):
-    return hash%spatialLookup.size()
+    return hash%particleNumber
 
 def UpdateSpatialLookup():
     for i in range(0,particleNumber):
         cellX,cellY = PositionToCellCoord(position[i],smoothingRadius)
         cellKey = GetKeyFromHash(HashCell(cellX,cellY))
-        spatialLookup[i] = Entry(i,cellKey)
+        spatialLookup[i] = (i,cellKey)
         startIndices[i] = -1
-    np.sort(spatialLookup)
+    np.sort(spatialLookup) #cellKey를 기준으로 정렬
     for i in range(0,particleNumber):
-        key = spatialLookup[i].cellKey
+        key = spatialLookup[i][1]
         if i == 0:
             keyPrev = -1
         else:
-            keyPrev = spatialLookup[i-1].cellKey
+            keyPrev = spatialLookup[i-1][1]
         if key != keyPrev:
             startIndices[key] = i
 
 def ForeachPointWithinRadius(samplePoint):
     (centerX,centerY) = PositionToCellCoord(samplePoint,smoothingRadius)
-    for offsetX, offsetY in cellOffsets:
+    for (offsetX, offsetY) in cellOffsets:
         key = GetKeyFromHash(HashCell(centerX+offsetX,centerY+offsetY))
         cellStartIndex = startIndices[key]
         for i in range(cellStartIndex,spatialLookup.size()):
             if spatialLookup[i].cellKey != key:
                 break
-            particleIndex = spatialLookup[i].particleIndex
-            sqrDst = sqrMagnitude(position[particleIndex], samplePoint)
+            particleIndex = spatialLookup[i][0]
+            #sqrDst = sqrMagnitude(position[particleIndex], samplePoint)
+            #반복해야 하는 함수 집어넣기
 
 
 ########################################################################
