@@ -1,8 +1,7 @@
 import pygame
 import math
 import numpy as np
-from numba import njit
-from numba import cuda
+from numba import njit,cuda
 
 pygame.init()
 
@@ -23,10 +22,10 @@ pressureMultiplier = 1
 
 #particle setting
     #particle align setting
-particleNumber = 100
+particleNumber = 300
 particleSize = 3
 particleDistance = 10 # distance between particle's starting point
-particleNumberInRow = 5
+particleNumberInRow = 30
     #particle physics setting
 particleMass = 1
 smoothingRadius = 50.0
@@ -78,6 +77,11 @@ particleDensities = np.zeros(position.shape[0])
 #particle smoothing variables
 scale = 12/(3.141*pow(smoothingRadius,4))
 volume = 3.141 * pow(smoothingRadius,4)/6
+
+#########################################################################
+#Temporary
+#########################################################################
+time_to_Calc = []
 
 
 #########################################################################
@@ -228,6 +232,7 @@ while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
+            print(time_to_Calc)
     
     dt = clock.tick(60)/100
     
