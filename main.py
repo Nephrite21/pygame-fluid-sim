@@ -14,21 +14,22 @@ screenSize = [800,450]
 
 #simulation settings
 boundsSize = (600, 350)
-gravity = 5
-collisionDamping = 0.95
-dt = 0
-targetDensity = 1
-pressureMultiplier = 1
+gravity = 10
+collisionDamping = 1
+targetDensity = 1.5
+pressureMultiplier = 5
+deltaTimeSetting = "fixed" #clock and fixed. use fixed when computing speed is low
+deltaTime = 0.16 #seconds per frame
 
 #particle setting
     #particle align setting
-particleNumber = 300
+particleNumber = 200
 particleSize = 3
 particleDistance = 10 # distance between particle's starting point
 particleNumberInRow = 30
     #particle physics setting
 particleMass = 1
-smoothingRadius = 50.0
+smoothingRadius = 15
 
 #DrawSetting
 backgroundColor = (0,0,0)
@@ -53,6 +54,10 @@ clock = pygame.time.Clock()
 boundsPosition = ((screenSize[0]-boundsSize[0])/2,(screenSize[1]-boundsSize[1])/2)
 Center = (screenSize[0]/2,screenSize[1]/2)
 halfboundSize = (boundsSize[0]/2 - particleSize, boundsSize[1]/2-particleSize)
+if deltaTimeSetting == "clock":
+    dt = clock.tick(60)/100
+elif deltaTimeSetting == "fixed":
+    dt = deltaTime
 
 #particle configuration
     #particle placing
@@ -70,8 +75,12 @@ for i in range(0,particleNumber):
     hh.append([0.0,0.0])
 position = np.array(gg)
 velocity = np.array(hh)
-particleProperties = np.zeros(position.shape[0])
-particleDensities = np.zeros(position.shape[0])
+particleProperties = np.zeros(particleNumber)
+particleDensities = np.zeros(particleNumber)
+pressureForce = np.zeros((particleNumber,2))
+spatialLookup = np.zeros(particleNumber)
+startIndices = np.zeros(particleNumber)
+smoothingRadiusX2 = smoothingRadius*smoothingRadius
 #바보같이 써놓은 코드, 나중에 제대로 바꿀것
 
 #particle smoothing variables
@@ -93,6 +102,11 @@ def magnitude(a,b=np.zeros(2)):
     for i in a-b:
         squaredValue += i*i
     return math.sqrt(squaredValue)
+def sqrMagnitude(a,b=np.zeros(2)):
+    squaredValue = 0
+    for i in a-b:
+        squaredValue += i*i
+    return squaredValue
 
 def normVec2(a):
     if a[0] == 0 and a[1] == 0:
@@ -105,18 +119,17 @@ def normVec2(a):
 
 #Physics functions
 def ResolveCollisions():
-    for i in range(0,particleNumber):
-        if abs(Center[0]-position[i][0]) > halfboundSize[0]:
-            position[i][0] = math.copysign(halfboundSize[0], position[i][0]-Center[0])+Center[0]
-            velocity[i][0] = velocity[i][0] * collisionDamping * -1
-        if abs(Center[1]-position[i][1]) > halfboundSize[1]:
-            position[i][1] = math.copysign(halfboundSize[1],position[i][1]-Center[1])+ Center[1]
-            velocity[i][1] = velocity[i][1] * collisionDamping * -1
+    out_of_bounds_x = np.abs(Center[0] - position[:, 0]) > halfboundSize[0]
+    out_of_bounds_y = np.abs(Center[1] - position[:, 1]) > halfboundSize[1]
+
+    position[out_of_bounds_x, 0] = np.sign(position[out_of_bounds_x, 0] - Center[0]) * halfboundSize[0] + Center[0]
+    velocity[out_of_bounds_x, 0] *= -collisionDamping
+
+    position[out_of_bounds_y, 1] = np.sign(position[out_of_bounds_y, 1] - Center[1]) * halfboundSize[1] + Center[1]
+    velocity[out_of_bounds_y, 1] *= -collisionDamping
 
 def ApplyGravity():
     velocity[:,1]+= gravity*dt
-    #for positions in position:
-    #   positions[1] = positions[1] + gravity*dt
     
 def ApplyVelocity():
     global position
@@ -125,11 +138,9 @@ def ApplyVelocity():
  
 
 #fluid functions
-
 def SmoothingKernel(dst):
-    if(dst >= smoothingRadius):
-        return 0.0
-    return (smoothingRadius-dst) * (smoothingRadius-dst)/volume
+    dst[dst >= smoothingRadius] = 0.0
+    return np.maximum(smoothingRadius - dst, 0.0) * np.maximum(smoothingRadius - dst, 0.0) / volume
 
 
 def SmoothingKernelDerivates(dst):
@@ -140,8 +151,8 @@ def SmoothingKernelDerivates(dst):
 #@cuda.jit
 def CalculateDensity(samplePoint):
     a= position - samplePoint
-    dstx2 = np.power(a[:,0],2) + np.power(a[:,1],2)
-    dst = np.clip(smoothingRadius-np.sqrt(dstx2), a_min=0.0, a_max=None)
+    dstX2 = np.power(a[:,0],2) + np.power(a[:,1],2) #distance squared
+    dst = np.clip(smoothingRadius-np.sqrt(dstX2), a_min=0.0, a_max=None)
     influence = np.power(dst,2)/volume
     densities = particleMass*influence
     return np.sum(densities)
@@ -164,9 +175,7 @@ def CalculateDensity(samplePoint):
 
 
 def CalculateSharedPressure(densityA, densityB):
-    pressureA = ConvertDensityToPressure(densityA)
-    pressureB = ConvertDensityToPressure(densityB)
-    return (pressureA+pressureB)/2
+    return ((densityA - targetDensity) * pressureMultiplier+(densityB - targetDensity) * pressureMultiplier)/2
 
 
 def CalculatePressureForce(particleIndex):
@@ -186,25 +195,32 @@ def CalculatePressureForce(particleIndex):
     return pressureForce
 
 
+""" def CalculatePressureForce(particleIndex):
+    pressureForce = np.array([0.0, 0.0])
+    for i in range(particleNumber):
+        if i == particleIndex:
+            continue
+        offset = position[i] - position[particleIndex]
+        dst = np.linalg.norm(offset)
+        dir = np.divide(offset, dst, out=np.zeros_like(offset), where=dst != 0)
+        slope = SmoothingKernelDerivates(dst)
+        sharedPressure = CalculateSharedPressure(particleDensities[i], particleDensities[particleIndex])
+        pressureForce += -sharedPressure * dir * slope * particleMass / particleDensities[i]
+    return pressureForce """
+
 def UpdateDensities():
-    for i in range(0,particleNumber):
-        particleDensities[i] = CalculateDensity(position[i])
-
-
-def ConvertDensityToPressure(density):
-    return (density - targetDensity) * pressureMultiplier
-
+    global particleDensities
+    particleDensities = np.array([CalculateDensity(pos) for pos in position])
 
 def ApplyPressureToParticle():
-    for i in range(0,particleNumber):
-        pressureForce = CalculatePressureForce(i)
-        pressureAcceleration = pressureForce / particleDensities[i]
-        velocity[i] += pressureAcceleration * dt
+    global pressureForce, velocity
+    pressureForce = np.array([CalculatePressureForce(i) for i in range(particleNumber)])
+    velocity += (pressureForce.T / particleDensities).T * dt
 
 
 def SimulatePhysics():
     UpdateDensities()
-    #ApplyGravity()
+    ApplyGravity()
     ApplyPressureToParticle()
     ApplyVelocity()
     ResolveCollisions()
@@ -223,6 +239,45 @@ def DrawAll():
     DrawBackground()
     DrawParticle()
 
+#optimization
+def PositionToCellCoord(point, radius):
+    cellX = point[0]//radius
+    cellY = point[1]//radius
+    return (cellX,cellY)
+
+def HashCell(cellX,cellY):
+    return cellX * 15823 + cellY*9737333
+
+def GetKeyFromHash(hash):
+    return hash%spatialLookup.size()
+
+def UpdateSpatialLookup():
+    for i in range(0,particleNumber):
+        cellX,cellY = PositionToCellCoord(position[i],smoothingRadius)
+        cellKey = GetKeyFromHash(HashCell(cellX,cellY))
+        spatialLookup[i] = Entry(i,cellKey)
+        startIndices[i] = -1
+    np.sort(spatialLookup)
+    for i in range(0,particleNumber):
+        key = spatialLookup[i].cellKey
+        if i == 0:
+            keyPrev = -1
+        else:
+            keyPrev = spatialLookup[i-1].cellKey
+        if key != keyPrev:
+            startIndices[key] = i
+
+def ForeachPointWithinRadius(samplePoint):
+    (centerX,centerY) = PositionToCellCoord(samplePoint,smoothingRadius)
+    for offsetX, offsetY in cellOffsets:
+        key = GetKeyFromHash(HashCell(centerX+offsetX,centerY+offsetY))
+        cellStartIndex = startIndices[key]
+        for i in range(cellStartIndex,spatialLookup.size()):
+            if spatialLookup[i].cellKey != key:
+                break
+            particleIndex = spatialLookup[i].particleIndex
+            sqrDst = sqrMagnitude(position[particleIndex], samplePoint)
+
 
 ########################################################################
 #GAME ENGINE
@@ -232,10 +287,10 @@ while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
-            print(time_to_Calc)
     
-    dt = clock.tick(60)/100
-    
+    if deltaTimeSetting == "clock":
+        dt = clock.tick(60)/100
+
     #simulate physics
     SimulatePhysics()
     
