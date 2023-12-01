@@ -23,13 +23,13 @@ pressureMultiplier = 1
 
 #particle setting
     #particle align setting
-particleNumber = 24
+particleNumber = 100
 particleSize = 3
 particleDistance = 10 # distance between particle's starting point
 particleNumberInRow = 5
     #particle physics setting
 particleMass = 1
-smoothingRadius = 50
+smoothingRadius = 50.0
 
 #DrawSetting
 backgroundColor = (0,0,0)
@@ -137,10 +137,9 @@ def SmoothingKernelDerivates(dst):
 def CalculateDensity(samplePoint):
     a= position - samplePoint
     dstx2 = np.power(a[:,0],2) + np.power(a[:,1],2)
-    dst = np.clip(np.sqrt(dstx2) - smoothingRadius, a_min=0, a_max=None)
+    dst = np.clip(smoothingRadius-np.sqrt(dstx2), a_min=0.0, a_max=None)
     influence = np.power(dst,2)/volume
     densities = particleMass*influence
-    print(np.sum(densities))
     return np.sum(densities)
 
 #@cuda.jit
