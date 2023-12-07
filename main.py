@@ -24,9 +24,9 @@ deltaTime = 0.16 #seconds per frame
 #particle setting
     #particle align setting
 particleNumber = 75
-particleSize = 3
-particleDistance = 12 # distance between particle's starting point
-particleNumberInRow = 8
+particleSize = 1
+particleDistance = 5 # distance between particle's starting point
+particleNumberInRow = 15
     #particle physics setting
 particleMass = 1
 smoothingRadius = 30
@@ -76,9 +76,9 @@ for i in range(0,particleNumber):
 position = np.array(gg)
 velocity = np.array(hh)
 particleProperties = np.zeros(particleNumber)
-particleDensities = np.zeros(particleNumber)
+particleDensities = np.ones(particleNumber)
 pressureForce = np.zeros((particleNumber,2))
-spatialLookup = np.zeros(particleNumber)
+spatialLookup = np.zeros((particleNumber,2))
 startIndices = np.zeros(particleNumber)
 smoothingRadiusX2 = smoothingRadius*smoothingRadius
 cellOffsets = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,0),(0,1),(1,-1),(1,0),(1,1)]
@@ -180,7 +180,7 @@ def CalculateSharedPressure(densityA, densityB):
 
 
 def CalculatePressureForce(particleIndex):
-    pressureForce = np.array([0.0,0.0])
+    pressureForce = np.zeros(2)
     for i in range(0,particleNumber):
         if i == particleIndex:
             continue
@@ -192,6 +192,8 @@ def CalculatePressureForce(particleIndex):
             dir = offset/dst
         slope = SmoothingKernelDerivates(dst)
         sharedPressure = CalculateSharedPressure(particleDensities[i], particleDensities[particleIndex])
+        if particleDensities[i] == 0:
+            continue
         pressureForce += -sharedPressure * dir * slope * particleMass / particleDensities[i]
     return pressureForce
 
@@ -220,9 +222,12 @@ def ApplyPressureToParticle():
 
 
 def SimulatePhysics():
+    #UpdateSpatialLookup()
     UpdateDensities()
-    ApplyGravity()
+    #ForeachPointWithinRadius() ##not implemented yet
+    
     ApplyPressureToParticle()
+    ApplyGravity()
     ApplyVelocity()
     ResolveCollisions()
    
@@ -250,15 +255,16 @@ def HashCell(cellX,cellY):
     return cellX * 15823 + cellY*9737333
 
 def GetKeyFromHash(hash):
-    return hash%particleNumber
+    return int(hash)%particleNumber
 
 def UpdateSpatialLookup():
+    global spatialLookup
     for i in range(0,particleNumber):
-        cellX,cellY = PositionToCellCoord(position[i],smoothingRadius)
+        cellX,cellY = PositionToCellCoord(position[i])
         cellKey = GetKeyFromHash(HashCell(cellX,cellY))
-        spatialLookup[i] = (i,cellKey)
+        spatialLookup[i] = (i,cellKey) #cellKey와 파티클 인덱스를 저장
         startIndices[i] = -1
-    np.sort(spatialLookup) #cellKey를 기준으로 정렬
+    spatialLookup = np.sort(spatialLookup,axis=0) #cellKey를 기준으로 정렬
     for i in range(0,particleNumber):
         key = spatialLookup[i][1]
         if i == 0:
@@ -266,7 +272,7 @@ def UpdateSpatialLookup():
         else:
             keyPrev = spatialLookup[i-1][1]
         if key != keyPrev:
-            startIndices[key] = i
+            startIndices[int(key)] = i
 
 def ForeachPointWithinRadius(samplePoint):
     (centerX,centerY) = PositionToCellCoord(samplePoint,smoothingRadius)
@@ -279,6 +285,37 @@ def ForeachPointWithinRadius(samplePoint):
             particleIndex = spatialLookup[i][0]
             #sqrDst = sqrMagnitude(position[particleIndex], samplePoint)
             #반복해야 하는 함수 집어넣기
+
+def ForeachPointWithinRadiusUpdateDensities(samplePoint):
+    global particleDensities
+    density = 0
+    (centerX,centerY) = PositionToCellCoord(samplePoint,smoothingRadius) #위치를 기반으로 셀 좌표 구한다
+    for (offsetX, offsetY) in cellOffsets: # 계산할 범위는 중앙 기준 1칸거리인 칸 안에서 해야할일은~
+        key = GetKeyFromHash(HashCell(centerX+offsetX,centerY+offsetY)) #해쉬키를 구한다
+        cellStartIndex = startIndices[key] # 해쉬키를 기반으로 시작 인덱스를 구한다.
+        for i in range(cellStartIndex,spatialLookup.size()): #인덱스 끝까지
+            if spatialLookup[i].cellKey != key:
+                break
+            particleIndex = spatialLookup[i][0]
+            particlePosition = position[particleIndex]
+            density += calcDens(samplePoint, particlePosition)
+
+def calcDens(samplePoint,particlePosition):
+    dst = magnitude(particlePosition,samplePoint)
+
+            
+#def UpdateDensities():
+#    global particleDensities
+#    particleDensities = np.array([CalculateDensity(pos) for pos in position])
+#def CalculateDensity(samplePoint):
+#    a= position - samplePoint
+#    dstX2 = np.power(a[:,0],2) + np.power(a[:,1],2) #distance squared
+#    # dst = np.clip(smoothingRadius-np.sqrt(dstX2), a_min=0.0, a_max=None)
+#    dstX2[dstX2 > smoothingRadius] = 0
+#    influence = dstX2/volume
+#    #influence = np.power(dst,2)/volume
+#    densities = particleMass*influence
+#    return np.sum(densities)
 
 
 ########################################################################
